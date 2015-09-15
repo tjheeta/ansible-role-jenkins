@@ -1,0 +1,15 @@
+- name: Ensure /tmp is writable
+  shell: chmod 777 /tmp && chmod +t /tmp
+
+- user: name=jenkins shell=/bin/bash home=/var/lib/jenkins
+- file: dest=/var/lib/jenkins/.ssh state=directory mode=0700 owner=jenkins group=jenkins
+- authorized_key: user=jenkins key="{{ jenkins_ssh_key_public }}"
+- copy: content="{{ jenkins_ssh_key_private }}" dest=/var/lib/jenkins/.ssh/id_rsa mode=0400 owner=jenkins
+- copy:
+    owner: jenkins
+    group: jenkins
+    dest: /var/lib/jenkins/setup_env.sh
+    content: |
+       export JENKINS_ENVIRONMENT={{ jenkins_environment }}
+
+

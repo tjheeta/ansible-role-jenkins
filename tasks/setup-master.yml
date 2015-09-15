@@ -1,0 +1,88 @@
+---
+# Variable setup.
+- name: Include OS-Specific variables
+  include_vars: "{{ ansible_os_family }}.yml"
+
+- include: packages.yml
+  tags: jenkins_packages
+
+- name: Define jenkins_repo_url
+  set_fact:
+    jenkins_repo_url: "{{ __jenkins_repo_url }}"
+  when: jenkins_repo_url is not defined
+
+- name: Define jenkins_repo_key_url
+  set_fact:
+    jenkins_repo_key_url: "{{ __jenkins_repo_key_url }}"
+  when: jenkins_repo_key_url is not defined
+
+# Setup/install tasks.
+- include: setup-master-RedHat.yml
+  when: ansible_os_family == 'RedHat'
+
+- include: setup-master-Debian.yml
+  when: ansible_os_family == 'Debian'
+
+- include: common.yml
+
+# Make sure Jenkins starts, then configure Jenkins.
+- name: Ensure Jenkins is started and runs on startup.
+  service: name=jenkins state=started enabled=yes
+
+- name: Wait for Jenkins to start up before proceeding.
+  shell: "curl -D - --silent http://{{ jenkins_hostname }}:8080{{ jenkins_url_prefix }}/cli/"
+  register: result
+  until: (result.stdout.find("200 OK") != -1) and (result.stdout.find("Please wait while") == -1)
+  retries: "{{ jenkins_connection_retries }}"
+  delay: "{{ jenkins_connection_delay }}"
+  changed_when: false
+
+- name: Get the jenkins-cli jarfile from the Jenkins server.
+  get_url:
+    url: "http://{{ jenkins_hostname }}:8080{{ jenkins_url_prefix }}/jnlpJars/jenkins-cli.jar"
+    dest: "{{ jenkins_jar_location }}"
+  register: jarfile_get
+  until: "'OK' in jarfile_get.msg or 'file already exists' in jarfile_get.msg"
+  retries: 5
+  delay: 10
+
+# Update Jenkins and install configured plugins.
+- include: plugins.yml
+  tags: jenkins_plugins
+
+- include: master_auth.yml
+  tags: jenkins_master_auth
+
+- name: Setup slave node directory
+  tags: setup_slave
+  file: dest=/var/lib/jenkins/nodes/slave-{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }} state=directory owner=jenkins group=jenkins
+  with_items: groups['jenkins-slaves']
+
+- name: Setup slave configuration
+  tags: setup_slave
+  copy: 
+    dest: /var/lib/jenkins/nodes/slave-{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}/config.xml
+    owner: jenkins
+    group: jenkins
+    content: |
+      <?xml version='1.0' encoding='UTF-8'?>
+      <slave>
+        <name>slave-{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}</name>
+        <description></description>
+        <remoteFS>/var/lib/jenkins</remoteFS>
+        <numExecutors>5</numExecutors>
+        <mode>NORMAL</mode>
+        <retentionStrategy class="hudson.slaves.RetentionStrategy$Always"/>
+        <launcher class="hudson.plugins.sshslaves.SSHLauncher" plugin="ssh-slaves@1.9">
+          <host>{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}</host>
+          <port>22</port>
+          <credentialsId>a7e49357-52c8-4c6d-a3a0-139005ab447f</credentialsId>
+          <maxNumRetries>0</maxNumRetries>
+          <retryWaitTime>0</retryWaitTime>
+        </launcher>
+        <label>slave</label>
+        <nodeProperties/>
+      </slave>
+  with_items: groups['jenkins-slaves']
+  notify: restart jenkins
+

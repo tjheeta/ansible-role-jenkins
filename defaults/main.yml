@@ -8,3 +8,6 @@ jenkins_plugins:
   - sonar
   - ssh
 jenkins_url_prefix: ""
+jenkins_environment: dev
+jenkins_setup_master: false
+jenkins_setup_slave: false

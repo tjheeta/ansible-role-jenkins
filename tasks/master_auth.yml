@@ -1,0 +1,19 @@
+# Connect to the jenkins server to create the hudson.util.Secret
+- shell: curl http://{{ jenkins_hostname }}:8080/
+  ignore_errors: true
+
+# Add the public ssh key and an api_key for jenkins
+- copy: src=encrypt.py dest=/var/lib/jenkins/encrypt.py mode=0755 owner=jenkins
+- copy: src=decrypt.py dest=/var/lib/jenkins/decrypt.py mode=0755 owner=jenkins
+- shell: perl -le 'print map { (a..z,A..Z,0..9)[rand 62] } 0..pop' 15
+  register: api_key
+- shell: /var/lib/jenkins/encrypt.py /var/lib/jenkins/secrets/master.key /var/lib/jenkins/secrets/hudson.util.Secret {{ api_key.stdout }}
+  register: encrypted_api_key
+
+# The template uses two variables one for the ssh_key_git_public and one for encrypted_api_key
+- file: path=/var/lib/jenkins/users/jenkins state=directory mode=0755 owner=jenkins
+- template: src=jenkins_user_config.xml.j2 mode=0644 owner=jenkins dest=/var/lib/jenkins/users/jenkins/config.xml force=no
+  notify: restart jenkins
+
+- copy: src=credentials.xml dest=/var/lib/jenkins/credentials.xml owner=jenkins
+  notify: restart jenkins
